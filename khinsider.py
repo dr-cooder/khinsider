@@ -57,7 +57,9 @@ if __name__ == '__main__':
     # User-friendly name, import name, pip specification.
     requiredModules = [
         ['requests', 'requests', 'requests >= 2.0.0, < 3.0.0'],
-        ['Beautiful Soup 4', 'bs4', 'beautifulsoup4 >= 4.4.0, < 5.0.0']
+        ['Beautiful Soup 4', 'bs4', 'beautifulsoup4 >= 4.4.0, < 5.0.0'],
+        ['Js2Py', 'js2py', 'Js2Py >= 0.74, < 1.0.0'],
+        ['pyjsparser', 'pyjsparser', 'pyjsparser >= 2.7.1, < 3.0.0']
     ]
 
     def moduleExists(name):
@@ -121,13 +123,20 @@ if __name__ == '__main__':
 
 import requests
 from bs4 import BeautifulSoup
+import js2py
+import pyjsparser
 
 BASE_URL = 'https://downloads.khinsider.com/'
 
+FILESYSTEM_ENCODING = sys.getfilesystemencoding()
+# Fun(?) fact: on Python 2, sys.getfilesystemencoding returns 'mbcs' even
+# on Windows NT (1993!) and later where filenames are natively Unicode.
+FILESYSTEM_ENCODING = 'utf-8' if FILESYSTEM_ENCODING == 'mbcs' else 'utf-8'
 # Although some of these are valid on Linux, keeping this the same
 # across systems is nice for consistency AND it works on WSL.
 FILENAME_INVALID_RE = re.compile(r'[<>:"/\\|?*]')
 def to_valid_filename(s):
+    s = s.encode(FILESYSTEM_ENCODING, 'replace').decode(FILESYSTEM_ENCODING)
     # Windows's Explorer doens't handle filenames that end in ' ' or '.'.
     s = s.rstrip(' .')
 
@@ -139,12 +148,12 @@ def to_valid_filename(s):
     return FILENAME_INVALID_RE.sub('-', s)
 
 
+STDOUT_ENCODING = sys.stdout.encoding or 'utf-8'
 # Different printin' for different Pythons.
 def unicodePrint(*args, **kwargs):
     unicodeType = str if sys.version_info[0] > 2 else unicode
-    encoding = sys.stdout.encoding or 'utf-8'
     args = [
-        arg.encode(encoding, 'replace').decode(encoding)
+        arg.encode(STDOUT_ENCODING, 'replace').decode(STDOUT_ENCODING)
         if isinstance(arg, unicodeType) else arg
         for arg in args
     ]
@@ -180,13 +189,41 @@ def toSoup(r):
         return BeautifulSoup(content, 'html.parser')
 
 
+def pyjsparserGetInits(declarations, *keys, inObject=False):
+    notFoundCount = len(keys)
+    finds = dict()
+    for declaration in declarations:
+        if notFoundCount == 0:
+            break
+        key = declaration['key']['value'] if inObject else declaration['id']['name']
+        if key in keys and key not in finds:
+            init = declaration['value'] if inObject else declaration['init']
+            initType = init['type']
+            initValid = False
+            if initType == 'Literal':
+                finds[key] = init['value']
+                initValid = True
+            elif initType == 'ArrayExpression':
+                finds[key] = init['elements']
+                initValid = True
+            if initValid:
+                notFoundCount -= 1
+    findsList = list()
+    for key in keys:
+        if key in finds:
+            findsList.append(finds[key])
+        else:
+            findsList.append(None)
+    return tuple(findsList)
+
+
 def getAppropriateFile(song, formatOrder):
     if formatOrder is None:
         return song.files[0]
     
     for extension in formatOrder:
         for file in song.files:
-            if os.path.splitext(file.filename)[1][1:].lower() == extension:
+            if file.ext == extension:
                 return file
     
     return song.files[0]
@@ -202,17 +239,12 @@ def friendlyDownloadFile(file, path, index, total, verbose=False):
         print("Song {} is nonexistent (404: Not Found). Skipping over.".format(numberStr), file=sys.stderr)
         return False
 
-    encoding = sys.getfilesystemencoding()
-    # Fun(?) fact: on Python 2, sys.getfilesystemencoding returns 'mbcs' even
-    # on Windows NT (1993!) and later where filenames are natively Unicode.
-    encoding = 'utf-8' if encoding == 'mbcs' else 'utf-8'
-    filename = file.filename.encode(encoding, 'replace').decode(encoding)
+    filename = to_valid_filename(file.filename)
 
     byTheWay = ""
     if filename != file.filename:
-        byTheWay = " (replaced characters not in the filesystem's \"{}\" encoding)".format(encoding)
-    
-    filename = to_valid_filename(filename)
+        byTheWay = " (replaced characters not in the filesystem's \"{}\" encoding)".format(FILESYSTEM_ENCODING)
+
     path = os.path.join(path, filename)
     
     if not os.path.exists(path):
@@ -265,6 +297,9 @@ class NonexistentFormatsError(SoundtrackError, ValueError):
             ", ".join('"{}"'.format(extension) for extension in self.requestedFormats))
         return s
 
+VARIABLES_START = 'if(supportsAudio){'
+VARIABLES_END = ',trackCount=tracks.length'
+VARIABLES_START_LEN = len(VARIABLES_START)
 class Soundtrack(object):
     """A KHInsider soundtrack. Initialize with a soundtrack ID.
     
@@ -306,18 +341,38 @@ class Soundtrack(object):
         table = self._contentSoup.find('table', id='songlist')
         header = table.find('tr')
         headings = [td.get_text(strip=True) for td in header(['th', 'td'])]
-        formats = [s.lower() for s in headings if s not in {"", "Track", "Song Name", "Download", "Size"}]
+        formats = [s.lower() for s in headings if s not in {"", "#", "CD", "Track", "Song Name", "Download", "Size"}]
         formats = formats or ['mp3']
         return formats
 
     @lazyProperty
     def songs(self):
-        table = self._contentSoup.find('table', id='songlist')
-        anchors = [tr.find('a') for tr in table('tr') if not tr.find('th')]
-        urls = [a['href'] for a in anchors]
-        songs = [Song(urljoin(self.url, url)) for url in urls]
-        return songs
-    
+        try:
+            script = self._contentSoup.find('script').string[4:] # Remove "eval" at start
+            theRealScript = js2py.eval_js(script) # Run the JavaScript that returns the actually-executed JavaScript as a string
+            whereVariablesStart = theRealScript.index(VARIABLES_START)
+            whereVariablesEnd = theRealScript.index(VARIABLES_END, whereVariablesStart)
+            declarations = pyjsparser.parse(theRealScript[whereVariablesStart+VARIABLES_START_LEN:whereVariablesEnd])['body'][0]['declarations']
+            (mediaPath, extension, tracks) = pyjsparserGetInits(declarations, 'mediaPath', 'extension', 'tracks') # Get the declarations from the actually-executed JavaScript string
+            songs = list()
+            for track in tracks:
+                (name, mainFileBase) = pyjsparserGetInits(track['properties'], 'name', 'file', inObject=True)
+                mainFile = mediaPath + mainFileBase + extension
+                mainFileExtStart = mainFile.rindex('.', mainFile.rindex('/')+1)+1
+                mainFileExt = mainFile[mainFileExtStart:]
+                mainFileWithoutExt = mainFile[:mainFileExtStart]
+                if mainFileExt not in self.availableFormats:
+                    raise Exception()
+                files = [File(urljoin(self.url, mainFileWithoutExt + ext)) for ext in self.availableFormats]
+                songs.append(QuickSong(name, files))
+            return songs
+        except:
+            table = self._contentSoup.find('table', id='songlist')
+            anchors = [tr.find('a') for tr in table('tr') if not tr.find('th')]
+            urls = [a['href'] for a in anchors]
+            songs = [Song(urljoin(self.url, url)) for url in urls]
+            return songs
+
     @lazyProperty
     def images(self):
         table = self._contentSoup.find('table')
@@ -330,6 +385,10 @@ class Soundtrack(object):
         images = [File(urljoin(self.url, url)) for url in urls]
         print(images)
         return images
+    
+    @lazyProperty
+    def imageCount(self):
+        return len(self.images)
 
     def download(self, path='', makeDirs=True, formatOrder=None, verbose=False):
         """Download the soundtrack to the directory specified by `path`!
@@ -354,21 +413,39 @@ class Soundtrack(object):
 
         if verbose and not self._isLoaded('songs'):
             print("Getting song list...")
-        files = []
+        songFiles = []
+        subfolderPaths = {}
         for song in self.songs:
             try:
-                files.append(getAppropriateFile(song, formatOrder))
+                if formatOrder:
+                    songFiles.append(getAppropriateFile(song, formatOrder))
+                else:
+                    for file in song.files:
+                        songFiles.append(file)
+                        subfolder = file.subfolder
+                        if subfolder not in subfolderPaths:
+                            subfolderPaths[subfolder] = os.path.abspath(os.path.realpath(os.path.join(path, subfolder)))
             except NonexistentSongError:
-                files.append(None)
-        files.extend(self.images)
-        totalFiles = len(files)
+                songFiles.append(None)
+        songFileCount = len(songFiles)
+        totalFileCount = songFileCount + self.imageCount
 
-        if makeDirs and not os.path.isdir(path):
-            os.makedirs(os.path.abspath(os.path.realpath(path)))
+        if makeDirs:
+            if not os.path.isdir(path):
+                os.makedirs(path)
+            for subfolder in subfolderPaths:
+                subfolderPath = subfolderPaths[subfolder]
+                if not os.path.isdir(subfolderPath):
+                    os.makedirs(subfolderPath)
 
         success = True
-        for fileNumber, file in enumerate(files, 1):
-            if not friendlyDownloadFile(file, path, fileNumber, totalFiles, verbose):
+        # Download songs before images for the sake of consistency with the original program
+        for fileNumber, file in enumerate(songFiles, 1):
+            # Don't categorize by extension subfolder if only one format is to be downloaded
+            if not friendlyDownloadFile(file, (path if formatOrder else subfolderPaths[file.subfolder]), fileNumber, totalFileCount, verbose):
+                success = False
+        for fileNumber, file in enumerate(self.images, songFileCount + 1):
+            if not friendlyDownloadFile(file, path, fileNumber, totalFileCount, verbose):
                 success = False
         
         return success
@@ -409,6 +486,21 @@ class Song(object):
         return [File(urljoin(self.url, a['href'])) for a in anchors]
 
 
+class QuickSong(object):
+    """A song on KHInsider with its name and files already pre-determined, i.e. no need to download the page.
+    
+    Properties:
+    * url:   The full URL of the song page.
+    * name:  The name of the song.
+    * files: A list of the song's files - there may be several if the song
+             is available in more than one format.
+    """
+
+    def __init__(self, name, files):
+        self.name = name
+        self.files = files
+
+
 class File(object):
     """A file belonging to a soundtrack on KHInsider.
     
@@ -438,6 +530,18 @@ class File(object):
     def __repr__(self):
         return "<{}: {}>".format(self.__class__.__name__, self.url)
     
+    @lazyProperty
+    def _ext_insensitive(self):
+        return os.path.splitext(self.filename)[1][1:]
+
+    @lazyProperty
+    def ext(self):
+        return self._ext_insensitive.lower()
+    
+    @lazyProperty
+    def subfolder(self):
+        return self._ext_insensitive.upper()
+    
     def download(self, path):
         """Download the file to `path`."""
         response = requests.get(self.url, timeout=10)
@@ -451,7 +555,7 @@ def download(soundtrackId, path='', makeDirs=True, formatOrder=None, verbose=Fal
     """
     soundtrack = Soundtrack(soundtrackId)
     soundtrack.name # To conistently always load the content in advance.
-    path = to_valid_filename(soundtrack.name) if path is None else path
+    path = to_valid_filename('{} ({})'.format(soundtrack.name, soundtrack.id)) if path is None else path
     if verbose:
         unicodePrint("Downloading to \"{}\".".format(path))
     return soundtrack.download(path, makeDirs, formatOrder, verbose)

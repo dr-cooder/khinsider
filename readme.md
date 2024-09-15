@@ -13,14 +13,19 @@ As an import (for when you're programming):
 ```python
 import khinsider
 khinsider.download('jumping-flash')
-# And bam, you've got the Jumping Flash soundtrack!
+# And bam, you've got the Jumping Flash soundtrack *in all available formats, neatly sorted into corresponding subfolders*!
 ```
 
 For anime music, [check out `thehylia.py`](https://github.com/obskyr/thehylia).
 
 Carefully put together by [@obskyr](http://twitter.com/obskyr)!
+Extra features added by [Felix Warner](https://felixwarner.com)!
 
-### **[Download it here!](https://github.com/obskyr/khinsider/archive/master.zip)**
+### **[Download it here!](https://github.com/dr-cooder/khinsider/archive/master.zip)**
+
+## Extra features added in this fork
+
+This fork will download the soundtrack in all available formats, sorted into corresponding subfolders, if no format is specified. It will also attempt to quickly get the URLs of each song without needing to download their respective pages by interpreting the JavaScript on the main album page.
 
 ## Usage
 
@@ -28,7 +33,7 @@ Just run `khinsider.py` from the command line with the sole parameter being the 
 
 If you want, you can also add another parameter as the output folder, but that's optional.
 
-You can also download other file formats (if available), like FLAC or OGG, as following:
+You can also download only specific file formats (if available), like FLAC or OGG, as following:
 
 ```cmd
 khinsider.py --format flac mother-3
@@ -44,7 +49,7 @@ For more detailed information, try running `khinsider.py --help`!
 
 ## As a module
 
-`khinsider.py` requires two non-standard modules: [requests](https://pypi.python.org/pypi/requests) and [beautifulsoup4](https://pypi.python.org/pypi/beautifulsoup4). Just run a `pip install` on them (with [pip](https://pip.readthedocs.org/en/latest/installing.html)), or just run `khinsider.py` on its own once and it'll install them for you.
+`khinsider.py` requires four non-standard modules: [requests](https://pypi.python.org/pypi/requests), [beautifulsoup4](https://pypi.python.org/pypi/beautifulsoup4), [Js2Py](https://pypi.org/project/Js2Py), and [pyjsparser](https://pypi.org/project/pyjsparser). Just run a `pip install` on them (with [pip](https://pip.readthedocs.org/en/latest/installing.html)), or just run `khinsider.py` on its own once and it'll install them for you.
 
 Here are the main functions you will be using:
 
@@ -68,11 +73,11 @@ Search khinsider for `term`. Return a list of `Soundtrack`s matching the search 
 
 There's a lot more detail to the API - more than would be sensible to write here. If you want to use `khinsider.py` as a module in a more advanced capacity, have a look at the `Soundtrack`, `Song`, and `File` objects in the source code! They're documented properly there for your reading pleasure.
 
-# Talk to me!
+# Talk to obskyr!
 
-You can easily get to me in these ways:
+You can easily get to obskyr, the original creator, in these ways:
 
 * [@obskyr](http://twitter.com/obskyr/) on Twitter!
 * [E-mail](mailto:powpowd@gmail.com) me!
 
-I'd love to hear it if you like `khinsider.py`! If there's a problem, or you'd like a new feature, submit an issue here on GitHub.
+obskyr would love to hear it if you like `khinsider.py`! If there's a problem specific to this fork, submit an issue here on GitHub.
