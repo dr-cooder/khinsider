@@ -127,6 +127,9 @@ import js2py
 import pyjsparser
 
 BASE_URL = 'https://downloads.khinsider.com/'
+DEFAULT_USER_AGENT = 'curl/7.81.0'
+def make_headers(userAgent):
+    return {'User-Agent': userAgent}
 
 FILESYSTEM_ENCODING = sys.getfilesystemencoding()
 # Fun(?) fact: on Python 2, sys.getfilesystemencoding returns 'mbcs' even
@@ -280,6 +283,10 @@ class SoundtrackError(Exception):
     def __init__(self, soundtrack):
         self.soundtrack = soundtrack
 
+class NoPageContentError(SoundtrackError, ValueError):
+    def __str__(self):
+        return "No page content was found using the headers {}. The User-Agent string could be blocked by the site, in which case please try using another with the -u or --user-agent parameter.".format(self.soundtrack.htmlHeaders)
+
 class NonexistentSoundtrackError(SoundtrackError, ValueError):
     def __str__(self):
         ost = '"{}" '.format(self.soundtrack.id) if len(self.soundtrack.id) <= 80 else ""
@@ -306,15 +313,17 @@ class Soundtrack(object):
     Properties:
     * id:     The soundtrack's unique ID, used at the end of its URL.
     * url:    The full URL of the soundtrack.
+    * htmlHeaders: The request headers used when downloading HTML.
     * name:   The textual title of the soundtrack.
     * availableFormats: A list of the formats the soundtrack is available in.
     * songs:  A list of Song objects representing the songs in the soundtrack.
     * images: A list of File objects representing the images in the soundtrack.
     """
 
-    def __init__(self, soundtrackId):
+    def __init__(self, soundtrackId, htmlHeaders):
         self.id = soundtrackId
         self.url = urljoin(BASE_URL, 'game-soundtracks/album/' + self.id)
+        self.htmlHeaders = htmlHeaders
     
     def __repr__(self):
         return "<{}: {}>".format(self.__class__.__name__, self.id)
@@ -324,11 +333,13 @@ class Soundtrack(object):
 
     @lazyProperty
     def _contentSoup(self):
-        soup = getSoup(self.url)
+        soup = getSoup(self.url, headers=self.htmlHeaders)
         contentSoup = soup.find(id='pageContent')
-        if contentSoup.find('p').string == "No such album":
-            # The pageContent and p exist even if the soundtrack doesn't, so no
-            # need for error handling here.
+        if contentSoup is None:
+            # As it turns out, the pageContent and p don't necessarily exist, so
+            # there IS a need for error handling here!
+            raise NoPageContentError(self)
+        elif contentSoup.find('p').string == "No such album":
             raise NonexistentSoundtrackError(self)
         return contentSoup
 
@@ -370,7 +381,7 @@ class Soundtrack(object):
             table = self._contentSoup.find('table', id='songlist')
             anchors = [tr.find('a') for tr in table('tr') if not tr.find('th')]
             urls = [a['href'] for a in anchors]
-            songs = [Song(urljoin(self.url, url)) for url in urls]
+            songs = [Song(urljoin(self.url, url), self.htmlHeaders) for url in urls]
             return songs
 
     @lazyProperty
@@ -456,23 +467,25 @@ class Song(object):
     
     Properties:
     * url:   The full URL of the song page.
+    * htmlHeaders: The request headers used when downloading HTML.
     * name:  The name of the song.
     * files: A list of the song's files - there may be several if the song
              is available in more than one format.
     """
     
-    def __init__(self, url):
+    def __init__(self, url, htmlHeaders):
         self.url = url
+        self.htmlHeaders = htmlHeaders
     
     def __repr__(self):
         return "<{}: {}>".format(self.__class__.__name__, self.url)
     
     @lazyProperty
     def _soup(self):
-        r = requests.get(self.url, timeout=10)
+        r = requests.get(self.url, timeout=10, headers=self.htmlHeaders)
         if r.url.rsplit('/', 1)[-1] == '404':
             raise NonexistentSongError("Nonexistent song page (404).")
-        return getSoup(self.url)
+        return getSoup(self.url, headers=self.htmlHeaders)
 
     @lazyProperty
     def name(self):
@@ -549,11 +562,11 @@ class File(object):
             outFile.write(response.content)
 
 
-def download(soundtrackId, path='', makeDirs=True, formatOrder=None, verbose=False):
+def download(soundtrackId, htmlHeaders=make_headers(DEFAULT_USER_AGENT), path='', makeDirs=True, formatOrder=None, verbose=False):
     """Download the soundtrack with the ID `soundtrackId`.
     See Soundtrack.download for more information.
     """
-    soundtrack = Soundtrack(soundtrackId)
+    soundtrack = Soundtrack(soundtrackId, htmlHeaders)
     soundtrack.name # To conistently always load the content in advance.
     path = to_valid_filename('{} ({})'.format(soundtrack.name, soundtrack.id)) if path is None else path
     if verbose:
@@ -565,15 +578,15 @@ class SearchError(KhinsiderError):
     pass
 
 
-def search(term):
+def search(term, htmlHeaders=make_headers(DEFAULT_USER_AGENT)):
     """Return a tuple of two lists of Soundtrack objects for the search term
     `term`. The first tuple contains album name results, and the second song
     name results.
     """
-    r = requests.get(urljoin(BASE_URL, 'search'), params={'search': term})
+    r = requests.get(urljoin(BASE_URL, 'search'), params={'search': term}, headers=htmlHeaders)
     path = urlsplit(r.url).path
     if path.split('/', 2)[1] == 'game-soundtracks':
-        return [Soundtrack(path.rsplit('/', 1)[-1])]
+        return [Soundtrack(path.rsplit('/', 1)[-1], htmlHeaders)]
 
     soup = toSoup(r)
 
@@ -581,7 +594,7 @@ def search(term):
     if not tables:
         raise SearchError(soup.find('p').get_text(strip=True))
 
-    soundtracks = [soundtracksInSearchTable(table) for table in tables]
+    soundtracks = [soundtracksInSearchTable(table, htmlHeaders) for table in tables]
     if len(soundtracks) == 1:
         if "song" in soup.find(id='pageContent').find('p').get_text():
             soundtracks.insert(0, [])
@@ -590,13 +603,13 @@ def search(term):
 
     return soundtracks
 
-def soundtracksInSearchTable(table):
+def soundtracksInSearchTable(table, htmlHeaders):
     anchors = (tr('td')[1].find('a') for tr in table('tr')[1:])
     soundtrackParams = [(a['href'].split('/')[-1], a.get_text(strip=True)) for a in anchors]
 
     soundtracks = []
     for id, name in soundtrackParams:
-        curSoundtrack = Soundtrack(id)
+        curSoundtrack = Soundtrack(id, htmlHeaders)
         curSoundtrack._lazy_name = name
         soundtracks.append(curSoundtrack)
 
@@ -677,8 +690,11 @@ if __name__ == '__main__':
                             "(for example, \"flac,mp3\": download FLAC if available, otherwise MP3).")
         parser.add_argument('-s', '--search', action='store_true',
                             help="Always search, regardless of whether the specified soundtrack ID exists or not.")
+        parser.add_argument('-u', '--user-agent', default=DEFAULT_USER_AGENT,
+                            help="User-Agent string for HTML requests.")
 
         arguments = parser.parse_args()
+        htmlHeaders = make_headers(arguments.user_agent)
 
         try:
             soundtrack = arguments.soundtrack.decode(sys.getfilesystemencoding())
@@ -713,7 +729,7 @@ if __name__ == '__main__':
         try:
             if onlySearch:
                 try:
-                    searchResults = search(searchTerm)
+                    searchResults = search(searchTerm, htmlHeaders)
                 except SearchError as e:
                     if re.match(r"^Found [0-9]+ matching albums.$", e.args[0]):
                         errorStr = "Couldn't search! {}".format(REPORT_STR)
@@ -729,13 +745,16 @@ if __name__ == '__main__':
                         print("No soundtracks found.")
             else:
                 try:
-                    success = download(soundtrack, outPath, formatOrder=formatOrder, verbose=True)
+                    success = download(soundtrack, htmlHeaders, outPath, formatOrder=formatOrder, verbose=True)
                     if not success:
                         print("\nNot all files could be downloaded.", file=sys.stderr)
                         return 1
+                except NoPageContentError as e:
+                    print(e)
+                    return 1
                 except NonexistentSoundtrackError:
                     try:
-                        searchResults = search(searchTerm)
+                        searchResults = search(searchTerm, htmlHeaders)
                     except SearchError:
                         searchResults = None
                     print("The soundtrack \"{}\" does not seem to exist.".format(soundtrack), file=sys.stderr)

@@ -39,6 +39,8 @@ You can also download only specific file formats (if available), like FLAC or OG
 khinsider.py --format flac mother-3
 ```
 
+You can even specify the User-Agent string used for HTML requests.
+
 If you don't want to go to the actual site to look for soundtracks, you can also just type a search term as the first parameter(s), and provided it's not a valid soundtrack, `khinsider.py` will give you a list of soundtracks matching that term.
 
 You're going to need [Python](https://www.python.org/downloads/) (if you don't know which version to get, choose the latest version of Python 3 - `khinsider.py` works with both 2 and 3), so install that (and [add it to your path](http://superuser.com/a/143121)) if you haven't already.
@@ -53,9 +55,11 @@ For more detailed information, try running `khinsider.py --help`!
 
 Here are the main functions you will be using:
 
-### `khinsider.download(soundtrackName[, path="", makeDirs=True, formatOrder=None, verbose=False])`
+### `khinsider.download(soundtrackId[, htmlHeaders, path="", makeDirs=True, formatOrder=None, verbose=False])`
 
-Download the soundtrack `soundtrackName`. This should be the name the soundtrack uses at the end of its album URL.
+Download the soundtrack `soundtrackId`. This should be the name the soundtrack uses at the end of its album URL.
+
+If `htmlHeaders` is specified, HTML pages will be downloaded using those headers.
 
 If `path` is specified, the soundtrack files will be downloaded to the directory that path points to.
 
@@ -69,6 +73,8 @@ If `verbose` is `True`, it will print progress as it is downloading.
 
 Search khinsider for `term`. Return a list of `Soundtrack`s matching the search term. You can then access `soundtrack.id` or `soundtrack.url`.
 
+If `htmlHeaders` is specified, HTML pages will be downloaded using those headers.
+
 ### More
 
 There's a lot more detail to the API - more than would be sensible to write here. If you want to use `khinsider.py` as a module in a more advanced capacity, have a look at the `Soundtrack`, `Song`, and `File` objects in the source code! They're documented properly there for your reading pleasure.
@@ -78,6 +84,6 @@ There's a lot more detail to the API - more than would be sensible to write here
 You can easily get to obskyr, the original creator, in these ways:
 
 * [@obskyr](http://twitter.com/obskyr/) on Twitter!
-* [E-mail](mailto:powpowd@gmail.com) me!
+* [E-mail](mailto:powpowd@gmail.com) obskyr!
 
 obskyr would love to hear it if you like `khinsider.py`! If there's a problem specific to this fork, submit an issue here on GitHub.
