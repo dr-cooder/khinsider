@@ -51,15 +51,15 @@ For more detailed information, try running `khinsider.py --help`!
 
 ## As a module
 
-`khinsider.py` requires four non-standard modules: [requests](https://pypi.python.org/pypi/requests), [beautifulsoup4](https://pypi.python.org/pypi/beautifulsoup4), [Js2Py](https://pypi.org/project/Js2Py), and [pyjsparser](https://pypi.org/project/pyjsparser). Just run a `pip install` on them (with [pip](https://pip.readthedocs.org/en/latest/installing.html)), or just run `khinsider.py` on its own once and it'll install them for you.
+`khinsider.py` requires five non-standard modules: [requests](https://pypi.python.org/pypi/requests), [beautifulsoup4](https://pypi.python.org/pypi/beautifulsoup4), [Js2Py](https://pypi.org/project/Js2Py), [pyjsparser](https://pypi.org/project/pyjsparser), and [cloudscraper](https://pypi.org/project/cloudscraper). Just run a `pip install` on them (with [pip](https://pip.readthedocs.org/en/latest/installing.html)), or just run `khinsider.py` on its own once and it'll install them for you.
 
 Here are the main functions you will be using:
 
-### `khinsider.download(soundtrackId[, htmlHeaders, path="", makeDirs=True, formatOrder=None, verbose=False])`
+### `khinsider.download(soundtrackId[, userAgent, path="", makeDirs=True, formatOrder=None, verbose=False])`
 
 Download the soundtrack `soundtrackId`. This should be the name the soundtrack uses at the end of its album URL.
 
-If `htmlHeaders` is specified, HTML pages will be downloaded using those headers.
+If `userAgent` is specified, HTML pages will be downloaded using that User Agent.
 
 If `path` is specified, the soundtrack files will be downloaded to the directory that path points to.
 
@@ -69,11 +69,11 @@ You can specify `formatOrder` to download soundtracks in specific formats. `form
 
 If `verbose` is `True`, it will print progress as it is downloading.
 
-### `khinsider.search(term)`
+### `khinsider.search(term, userAgent)`
 
 Search khinsider for `term`. Return a list of `Soundtrack`s matching the search term. You can then access `soundtrack.id` or `soundtrack.url`.
 
-If `htmlHeaders` is specified, HTML pages will be downloaded using those headers.
+If `userAgent` is specified, HTML pages will be downloaded using that User Agent.
 
 ### More
 
